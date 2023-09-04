@@ -287,15 +287,21 @@ def get_lean4_commit_from_config(config: str) -> str:
     """Return the required Lean commit given a ``lean-toolchain`` config."""
     config = config.strip()
     prefix = "leanprover/lean4:"
+    lean_url = ""
+    commit_search_regex = ""
     if config == f"{prefix}nightly":
         version = _get_latest_lean4_nightly()
+        lean_url = LEAN4_NIGHTLY_URL
+        commit_search_regex = r"/leanprover/lean4-nightly/commit/(?P<commit>[0-9a-z]+)"
     else:
         assert config.startswith(prefix), f"Invalid Lean 4 version: {config}"
         version = config[len(prefix) :]
+        lean_url = LEAN4_URL
+        commit_search_regex = r"/leanprover/lean4/commit/(?P<commit>[0-9a-z]+)"
 
-    url = os.path.join(LEAN4_NIGHTLY_URL, f"releases/tag/{version}")
+    url = os.path.join(lean_url, f"releases/tag/{version}")
     html = read_url(url)
-    m = re.search(r"/leanprover/lean4-nightly/commit/(?P<commit>[0-9a-z]+)", html)
+    m = re.search(commit_search_regex, html)
     return m["commit"]
 
 
