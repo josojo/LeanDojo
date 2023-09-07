@@ -428,7 +428,7 @@ class TracedTheorem:
 
         if self.uses_lean4:
             # logger.warning(proof)
-            raise NotImplementedError
+            # raise NotImplementedError
             assert (
                 isinstance(node.children[0], AtomNode4) and node.children[0].val == "by"
             )
