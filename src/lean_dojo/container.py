@@ -306,13 +306,15 @@ class DockerContainer(Container):
 
         def _exit_gracefully(signum, frame):
             cid = open(cid_file).read().strip()
-            execute(f"docker stop -t 1 {cid}", capture_output=True)
+            log = execute(f"docker stop -t 1 {cid}", capture_output=True)
             raise RuntimeError(f"Failed to execute {cmd}")
 
         old_sigint = signal.signal(signal.SIGINT, _exit_gracefully)
         old_sigterm = signal.signal(signal.SIGTERM, _exit_gracefully)
 
-        execute(cmd, capture_output=capture_output)
+        log = execute(cmd, capture_output=capture_output)
+        if capture_output:
+            logger.log("DEBUG", log)
 
         signal.signal(signal.SIGINT, old_sigint)
         signal.signal(signal.SIGTERM, old_sigterm)
