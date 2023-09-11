@@ -417,6 +417,12 @@ class TracedTheorem:
         if end < self.end:
             end = self.end
         return start, end
+    
+    def get_proof(self) -> str:
+        """Return the proof."""
+        start, end = self.locate_proof()
+        node  = self.get_proof_node()
+        return get_code_without_comments(node.lean_file, start, end, self.comments)
 
     def get_single_tactic_proof(self) -> Optional[str]:
         """Wrap the proof into a single (potentially very long) tactic."""
