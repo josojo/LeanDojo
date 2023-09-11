@@ -190,7 +190,10 @@ class NativeContainer(Container):
                 work_dir = Path.cwd() / work_dir.relative_to(work_dir.root)
 
         with working_directory(work_dir):
-            execute(cmd, capture_output=capture_output)
+            output, error = execute(cmd, capture_output=capture_output)
+            logger.debug(output, end="")
+            if error:
+                logger.error(error)
 
         self._unmount_files(mounts)
 
