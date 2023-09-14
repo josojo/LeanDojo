@@ -88,6 +88,9 @@ LOAD_TRACED_DEPENDENCIES_RECURSIVELY = (
 )
 """Whether to load traced dependencies recursively."""
 
+COMMON_REPL_DIR = Path(os.getenv("COMMON_REPL_DIR"))
+"""The directory where the common REPL is stored. Get the repo from here: https://github.com/josojo/Lean4Repl"""
+
 TACTIC_TIMEOUT = int(os.getenv("TACTIC_TIMEOUT", 5000))
 """Maximum time (in milliseconds) before interrupting a tactic when interacting with Lean (only for Lean 3).
 """
