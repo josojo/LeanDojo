@@ -16,6 +16,7 @@ from typing import Union, Tuple, List, Dict, Any, Optional
 from ..constants import (
     TMP_DIR,
     LEAN3_DEPS_DIR,
+    COMMON_REPL_DIR,
     LEAN4_DEPS_DIR,
     TACTIC_TIMEOUT,
     TACTIC_CPU_LIMIT,
@@ -227,24 +228,51 @@ class Dojo:
             # Run the modified file in a container.
             self.container = get_container()
             logger.debug(f"Launching the proof using {type(self.container)}")
-            mts = [Mount(Path.cwd(), Path(f"/workspace/{self.repo.name}"))]
             if self.repo.uses_lean3:
                 cmd = f"lean {self.file_path}"
             elif self.repo.is_lean4:
                 cmd = f"./build/release/stage1/bin/lean {self.file_path}"
             else:
+                # Build the common repl tactic in a separate git repo and copy the bin files into the traced repo
+
+                # For every lean version, we want to compile the repl tactic once
+                self.common_repl_dir = COMMON_REPL_DIR / self.repo.lean_version
+                if not os.path.exists(self.common_repl_dir):
+                    # Download git repo and put it into the self.common_repl_dir folder
+                    os.system(
+                        f"git clone https://github.com/josojo/Lean4Repl.git {self.common_repl_dir}"
+                    )
+
+                # overwrite the lake file to compile with the correct lean version
+                shutil.copyfile(
+                    traced_repo_path / "lean-toolchain",
+                    self.common_repl_dir / "lean-toolchain",
+                )
+                # build the lean4repl project in a separate container
+                workspace_dir = Path(f"/workspace/lean4repl/")
+                mts = [Mount(self.common_repl_dir, workspace_dir)]
                 self.container.run(
                     "lake build Lean4Repl",
                     mts,
                     as_current_user=True,
                     capture_output=True,
-                    work_dir=f"/workspace/{self.repo.name}",
+                    work_dir=str(workspace_dir),
                     cpu_limit=None,
                     memory_limit=None,
                     envs={},
                 )
+                logger.debug("Lean4Repl built finished, copying files")
+                # copy bin files into the modified repo
+                shutil.copytree(
+                    str(self.common_repl_dir) + "/build/",
+                    str(Path.cwd()) + "/build/",
+                    dirs_exist_ok=True,
+                )
                 cmd = f"lake env lean {self.file_path}"
 
+            # Mount the traced repo.
+            mts = [Mount(Path.cwd(), Path(f"/workspace/{self.repo.name}"))]
+            # Run the modified file in a container.
             self.proc = self.container.run_interactive(
                 cmd,
                 mts,
