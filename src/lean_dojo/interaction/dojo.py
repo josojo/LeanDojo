@@ -244,24 +244,24 @@ class Dojo:
                     )
 
                 # overwrite the lake file to compile with the correct lean version
-                shutil.copyfile(
-                    traced_repo_path / "lean-toolchain",
-                    self.common_repl_dir / "lean-toolchain",
-                )
+                # shutil.copyfile(
+                #     traced_repo_path / "lean-toolchain",
+                #     self.common_repl_dir / "lean-toolchain",
+                # )
                 # build the lean4repl project in a separate container
                 workspace_dir = Path(f"/workspace/lean4repl/")
                 mts = [Mount(self.common_repl_dir, workspace_dir)]
-                self.container.run(
-                    "lake build Lean4Repl",
-                    mts,
-                    as_current_user=True,
-                    capture_output=True,
-                    work_dir=str(workspace_dir),
-                    cpu_limit=None,
-                    memory_limit=None,
-                    envs={},
-                )
-                logger.debug("Lean4Repl built finished, copying files")
+                # self.container.run(
+                #     "lake build Lean4Repl",
+                #     mts,
+                #     as_current_user=True,
+                #     capture_output=True,
+                #     work_dir=str(workspace_dir),
+                #     cpu_limit=None,
+                #     memory_limit=None,
+                #     envs={},
+                # )
+                # logger.debug("Lean4Repl built finished, copying files")
                 # copy bin files into the modified repo
                 shutil.copytree(
                     str(self.common_repl_dir) + "/build/",
@@ -297,7 +297,7 @@ class Dojo:
                     raise ex
 
             assert res["error"] is None
-            # logger.debug(f"Response: {res}")
+            logger.debug(f"Response: {res}")
             if self.uses_tactics:
                 assert res["tacticState"] != "no goals"
                 init_state = TacticState(

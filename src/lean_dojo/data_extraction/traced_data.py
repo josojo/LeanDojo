@@ -406,6 +406,12 @@ class TracedTheorem:
         )
         webbrowser.open(url)
 
+    def get_proof(self) -> str:
+        """Return the proof."""
+        start, end = self.locate_proof()
+        node = self.get_proof_node()
+        return get_code_without_comments(node.lean_file, start, end, self.comments)
+
     def has_tactic_proof(self) -> bool:
         """Check if the theorem has a tactic-style proof."""
         return self.ast.has_tactic_proof()
