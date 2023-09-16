@@ -239,28 +239,29 @@ class Dojo:
                 self.common_repl_dir = COMMON_REPL_DIR / self.repo.lean_version
                 if not os.path.exists(self.common_repl_dir):
                     # Download git repo and put it into the self.common_repl_dir folder
+                    logger.debug("Downloading the Lean4Repl repo, as it did not exist")
                     os.system(
                         f"git clone https://github.com/josojo/Lean4Repl.git {self.common_repl_dir}"
                     )
 
                 # overwrite the lake file to compile with the correct lean version
-                # shutil.copyfile(
-                #     traced_repo_path / "lean-toolchain",
-                #     self.common_repl_dir / "lean-toolchain",
-                # )
+                shutil.copyfile(
+                    Path.cwd() / "lean-toolchain",
+                    self.common_repl_dir / "lean-toolchain",
+                )
                 # build the lean4repl project in a separate container
                 workspace_dir = Path(f"/workspace/lean4repl/")
                 mts = [Mount(self.common_repl_dir, workspace_dir)]
-                # self.container.run(
-                #     "lake build Lean4Repl",
-                #     mts,
-                #     as_current_user=True,
-                #     capture_output=True,
-                #     work_dir=str(workspace_dir),
-                #     cpu_limit=None,
-                #     memory_limit=None,
-                #     envs={},
-                # )
+                self.container.run(
+                    "lake build Lean4Repl",
+                    mts,
+                    as_current_user=True,
+                    capture_output=True,
+                    work_dir=str(workspace_dir),
+                    cpu_limit=None,
+                    memory_limit=None,
+                    envs={},
+                )
                 # logger.debug("Lean4Repl built finished, copying files")
                 # copy bin files into the modified repo
                 shutil.copytree(
