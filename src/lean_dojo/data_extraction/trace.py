@@ -140,7 +140,7 @@ def get_traced_repo_path(repo: LeanGitRepo) -> Path:
     return path
 
 
-def trace(repo: LeanGitRepo, dst_dir: Optional[Union[str, Path]] = None) -> TracedRepo:
+def trace(repo: LeanGitRepo, dst_dir: Optional[Union[str, Path]] = None, only_load_one_file: Optional[str]= None) -> TracedRepo:
     """Trace a repo (and its dependencies), saving the results to ``dst_dir``.
 
     The function only traces the repo when it's not available in the cache. Otherwise,
@@ -161,7 +161,7 @@ def trace(repo: LeanGitRepo, dst_dir: Optional[Union[str, Path]] = None) -> Trac
 
     cached_path = get_traced_repo_path(repo)
     logger.info(f"Loading the traced repo from {cached_path}")
-    traced_repo = TracedRepo.load_from_disk(cached_path)
+    traced_repo = TracedRepo.load_from_disk(cached_path, only_load_one_file)
     traced_repo.check_sanity()
 
     if dst_dir is not None:

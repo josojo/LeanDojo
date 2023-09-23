@@ -1211,8 +1211,7 @@ class TracedFile:
         assert path.suffixes == [".trace", ".xml"]
         lean_path = to_lean_path(root_dir, path, repo.uses_lean4)
         lean_file = LeanFile(root_dir, lean_path, repo.uses_lean4)
-
-        tree = etree.parse(path).getroot()
+        tree = etree.parse(root_dir / path).getroot()
         assert tree.tag == "TracedFile"
         assert tree.attrib["path"] == str(lean_path)
         assert tree.attrib["md5"] == compute_md5(lean_file.abs_path)
@@ -1252,11 +1251,15 @@ def _build_dependency_graph(
         for dep_path in tf.get_direct_dependencies():
             dep_path_str = str(dep_path)
             if not G.has_node(dep_path_str):
-                xml_to_index = (
-                    str(root_dir) + "/" + dep_path_str.replace("/src/", "/lib/")
-                ).replace(".lean", ".trace.xml")
+                if not dep_path_str.startswith("lake-packages/Mathlib"):
+                        continue
+                logger.debug(f"Adding {dep_path_str} to the dependency graph")
+                xml_to_index = to_xml_path(root_dir, dep_path, repo.uses_lean4)
+                logger.debug(f"Loading {xml_to_index} from disk, with modified path mathlib prefix")
                 new_traced_file = TracedFile.from_xml(root_dir, xml_to_index, repo)
+                traced_files.append(new_traced_file)
                 G.add_node(str(new_traced_file.path), traced_file=new_traced_file)
+                traced_files.append(new_traced_file)
             G.add_edge(tf_path_str, dep_path_str)
 
     assert nx.is_directed_acyclic_graph(G)
@@ -1468,7 +1471,7 @@ class TracedRepo:
                 )
 
     @classmethod
-    def load_from_disk(cls, root_dir: Union[str, Path]) -> "TracedRepo":
+    def load_from_disk(cls, root_dir: Union[str, Path], only_load_one_file: Optional[str] = None) -> "TracedRepo":
         """Load a traced repo from :file:`*.trace.xml` files."""
         root_dir = Path(root_dir).resolve()
         if not is_git_repo(root_dir):
@@ -1476,6 +1479,10 @@ class TracedRepo:
         repo = LeanGitRepo.from_path(root_dir)
 
         xml_paths = list(root_dir.glob("**/*.trace.xml"))
+        # xml_paths = [p for p in xml_paths if str(p).endswith("Mathlib/Init/Set.trace.xml")]
+        if only_load_one_file is not None:
+            xml_paths = [p for p in xml_paths if str(p).endswith(only_load_one_file)]
+        logger.debug("Only investigating the xml files of: " , xml_paths)
         logger.debug(
             f"Loading {len(xml_paths)} traced XML files from {root_dir} with {NUM_WORKERS} workers"
         )

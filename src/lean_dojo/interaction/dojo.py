@@ -1,10 +1,13 @@
 import re
 import os
+import shlex
+import subprocess
 import sys
 import json
 import time
 import signal
 import shutil
+import pexpect
 from pathlib import Path
 from loguru import logger
 from tempfile import mkdtemp
@@ -103,6 +106,55 @@ class DojoHardTimeoutError(Exception):
 class DojoInitError(Exception):
     pass
 
+def format_tatic_for_repl(proof: str) -> List[str]:
+    proof = proof.replace(";", "\n")
+    if proof.startswith("exact ("):
+        return [proof]
+    proof = undo_line_splits_for_unclosed_parenthesis(proof.split("\n"))
+    proof = undo_line_splits_for_dot_notation(proof)
+    return proof
+
+def undo_line_splits_for_dot_notation(commands: List) -> List:
+    """Undo line splits for unclosed parenthesis."""
+    # iterate over the index of the commands
+    i=0
+    while (i<=len(commands) - 2):
+        logger.debug(f"Checking dot notation line {i}: {commands[i]}")
+        # check if the leading character after spaces is a dot
+        if commands[i].strip()[0] == "\u00b7":
+            # count the leading spaces
+            num_spaces = len(commands[i]) - len(commands[i].lstrip())
+            # check if the next line has more leading spaces
+            if len(commands[i+1]) - len(commands[i+1].lstrip()) > num_spaces:
+                 # undo the line split
+                commands[i] = commands[i] + "\n"
+                commands[i] = commands[i] + commands[i + 1]
+                commands.pop(i + 1)
+                i -= 1
+        i+=1
+
+    return commands
+
+def undo_line_splits_for_unclosed_parenthesis(commands: List) -> List:
+    """Undo line splits for unclosed parenthesis."""
+    opening_parenthesis= ["(", "{", "[", "\u27e8"]
+    closing_parenthesis= [")", "}", "]", "\u27e9"]
+    # iterate over the index of the commands
+    for i in range(len(commands) - 1):
+        logger.debug(f"Checking line {i}: {commands[i]}")
+        for opening, closing in zip(opening_parenthesis, closing_parenthesis):
+            # count the number of opening and closing parenthesis
+            num_opening = commands[i].count(opening)
+            num_closing = commands[i].count(closing)
+            if num_opening > num_closing:
+                # undo the line split
+                commands[i] = commands[i] + "\n"
+                commands[i] = commands[i] + commands[i + 1]
+                commands.pop(i + 1)
+                i -= 1
+
+    return commands
+            
 
 def _get_all_dependencies(
     root_dir: Path, lean_path: Path, repo: LeanGitRepo
@@ -154,8 +206,7 @@ class Dojo:
         self.hard_timeout = hard_timeout
         self.additional_imports = additional_imports
 
-        if self.uses_tactics:
-            assert isinstance(entry, Theorem)
+        if isinstance(entry, Theorem):
             self.repo, self.file_path = entry.repo, entry.file_path
             self.is_successful = False
         else:
@@ -197,21 +248,16 @@ class Dojo:
 
         # Work in a temporary directory.
         self.origin_dir = Path.cwd()
-        self.tmp_dir = Path(mkdtemp(dir=TMP_DIR))
-
+        self.tmp_dir = Path("/Users/josojo/coding/ai/lean/Lean4ReplWithMathImport/Lean4ReplProcessing/")
+        os.makedirs(self.tmp_dir, exist_ok=True)
         try:
             self._install_handlers()
             os.chdir(self.tmp_dir)
 
+            logger.debug(f"Copying {self.repo.name} to {self.tmp_dir}")
             # Copy and `cd` into the repo.
             traced_repo_path = get_traced_repo_path(self.repo)
-            shutil.copytree(
-                traced_repo_path,
-                self.repo.name,
-                ignore=ignore_patterns("*.dep_paths", "*.ast.json", "*.trace.xml"),
-            )
-            os.chdir(self.repo.name)
-
+            # logger.debug(f"Traced repo path: {traced_repo_path}")   
             # Replace the human-written proof with a `repl` tactic.
             try:
                 traced_file = self._locate_traced_file(traced_repo_path)
@@ -220,73 +266,58 @@ class Dojo:
                     f"Cannot find the *.ast.json file for {self.entry} in {traced_repo_path}."
                 )
 
-            self._modify_file(traced_file)
-
+            logger.debug(f"Traced file: {traced_file}")
+            self._create_test_env(traced_file)
+            logger.debug(f"Test env created")
             # The REPL code cannot be used to interact with its own dependencies.
             unsupported_deps = self._get_unsupported_deps(traced_repo_path)
 
             # Run the modified file in a container.
             self.container = get_container()
-            logger.debug(f"Launching the proof using {type(self.container)}")
+            # logger.debug(f"Launching the proof using {type(self.container)}")
             if self.repo.uses_lean3:
                 cmd = f"lean {self.file_path}"
             elif self.repo.is_lean4:
                 cmd = f"./build/release/stage1/bin/lean {self.file_path}"
             else:
                 # Build the common repl tactic in a separate git repo and copy the bin files into the traced repo
+                cmd = f"lake env lean Main.lean"
 
-                # For every lean version, we want to compile the repl tactic once
-                self.common_repl_dir = COMMON_REPL_DIR / self.repo.lean_version
-                if not os.path.exists(self.common_repl_dir):
-                    # Download git repo and put it into the self.common_repl_dir folder
-                    logger.debug("Downloading the Lean4Repl repo, as it did not exist")
-                    os.system(
-                        f"git clone https://github.com/josojo/Lean4Repl.git {self.common_repl_dir}"
-                    )
 
-                # overwrite the lake file to compile with the correct lean version
-                shutil.copyfile(
-                    Path.cwd() / "lean-toolchain",
-                    self.common_repl_dir / "lean-toolchain",
-                )
-                # build the lean4repl project in a separate container
-                workspace_dir = Path(f"/workspace/lean4repl/")
-                mts = [Mount(self.common_repl_dir, workspace_dir)]
-                self.container.run(
-                    "lake build Lean4Repl",
-                    mts,
-                    as_current_user=True,
-                    capture_output=True,
-                    work_dir=str(workspace_dir),
-                    cpu_limit=None,
-                    memory_limit=None,
-                    envs={},
-                )
-                # logger.debug("Lean4Repl built finished, copying files")
-                # copy bin files into the modified repo
-                shutil.copytree(
-                    str(self.common_repl_dir) + "/build/",
-                    str(Path.cwd()) + "/build/",
-                    dirs_exist_ok=True,
-                )
-                cmd = f"lake env lean {self.file_path}"
-
+            # Run the command from cmd in the shell and get the output
+            # os.chdir(self.tmp_dir)
+            # os.system(cmd)
+            
+            logger.debug(f"Running {cmd}")
             # Mount the traced repo.
+            os.chdir(self.tmp_dir)
             mts = [Mount(Path.cwd(), Path(f"/workspace/{self.repo.name}"))]
             # Run the modified file in a container.
-            self.proc = self.container.run_interactive(
-                cmd,
-                mts,
-                cpu_limit=TACTIC_CPU_LIMIT,
-                memory_limit=TACTIC_MEMORY_LIMIT,
-                work_dir=f"/workspace/{self.repo.name}",
-                as_current_user=True,
-                envs={},
+            self.proc = subprocess.Popen(
+                shlex.split(cmd),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                encoding="utf-8",
+                bufsize=1,
             )
-
+ 
+            # pexpect.spawn(cmd, cwd=self.tmp_dir, encoding="utf-8")
+            # self.proc = self.container.run_interactive(
+            #     cmd,
+            #     mts,
+            #     cpu_limit=TACTIC_CPU_LIMIT,
+            #     memory_limit=TACTIC_MEMORY_LIMIT,
+            #     work_dir=f"/workspace/{self.repo.name}",
+            #     as_current_user=True,
+            #     envs={},
+            # )
+            logger.debug("Finished spawning the container")
             # Get the initial tactic state.
             try:
                 res = json.loads(self._read_next_line()[0])
+                logger.debug(f"Response: {res}")
             except Exception as ex:
                 if traced_file.path in unsupported_deps or traced_file.has_prelude:
                     raise DojoInitError(
@@ -295,11 +326,12 @@ class Dojo:
                 elif isinstance(ex, EOFError):
                     raise DojoInitError("EOF")
                 else:
+                    logger.error(f"Failed to parse the response: {ex}")
                     raise ex
 
             assert res["error"] is None
             logger.debug(f"Response: {res}")
-            if self.uses_tactics:
+            if self.uses_tactics or True:
                 assert res["tacticState"] != "no goals"
                 init_state = TacticState(
                     self._post_process(res["tacticState"]),
@@ -309,6 +341,17 @@ class Dojo:
                 assert self.uses_commands
                 init_state = CommandState(res["sid"])
 
+            # # Delete the content from the temp dir
+            # for file in os.listdir(self.tmp_dir):
+            #     file_path = os.path.join(self.tmp_dir, file)
+            #     try:
+            #         if os.path.isfile(file_path):
+            #             os.unlink(file_path)
+            #         elif os.path.isdir(file_path): 
+            #             shutil.rmtree(file_path)
+            #     except Exception as e:
+            #         print(f"Failed to delete {file_path}. Reason: {e}")
+            logger.debug(f"Finish init of dojo") 
             self.start_time = time.monotonic()
             self._set_timer()
 
@@ -369,7 +412,7 @@ class Dojo:
             self._cleanup_proc()
         finally:
             self._cleanup_tmp_dir()
-            self._uninstall_handlers()
+            # self._uninstall_handlers()
 
     def _cleanup_container(self) -> None:
         """Clean up the container."""
@@ -377,7 +420,7 @@ class Dojo:
         assert isinstance(self.container, DockerContainer) or isinstance(
             self.container, NativeContainer
         )
-        self.container.cleanup()
+        # self.container.cleanup()
 
     def _cleanup_proc(self) -> None:
         """Clean up the subprocess."""
@@ -390,9 +433,9 @@ class Dojo:
     def _cleanup_tmp_dir(self) -> None:
         """Clean up the temporary directory."""
         logger.debug("Cleaning up the temporary directory.")
-        os.chdir(self.origin_dir)
-        if self.tmp_dir is not None and os.path.exists(self.tmp_dir):
-            shutil.rmtree(self.tmp_dir)
+        # os.chdir(self.origin_dir)
+        # if self.tmp_dir is not None and os.path.exists(self.tmp_dir):
+        #     shutil.rmtree(self.tmp_dir)
 
     def __exit__(self, exc_type: None, exc_val: None, exc_tb: None) -> None:
         """Exit Dojo.
@@ -415,7 +458,9 @@ class Dojo:
             except Exception:
                 pass
 
+        logger.debug(f"Exiting Dojo for {self.entry}")
         self._cleanup()
+        logger.debug(f"Clean up done for Dojo {self.entry}")
 
     def _post_process(self, tactic_state: str) -> str:
         """Post-process the pretty-printed tactic state.
@@ -427,6 +472,7 @@ class Dojo:
             str: _description_
         """
         m = re.match(r"\d+ goals\n", tactic_state)
+        logger.debug(f"Post processing tactic state: {tactic_state}")
         if m is not None:
             return tactic_state[m.end() :]
         else:
@@ -435,6 +481,49 @@ class Dojo:
     def _get_imports(self) -> str:
         imports = ["Lean4Repl"] + self.additional_imports
         return "\n".join(f"import {_}" for _ in imports) + "\n\n"
+
+    def _create_test_env(self, traced_file: TracedFile) -> None:
+        """Create a test environment for the proof.
+        """
+        self.common_repl_dir = COMMON_REPL_DIR
+        if not os.path.exists(self.common_repl_dir):
+            # Download git repo and put it into the self.common_repl_dir folder
+            logger.debug("Downloading the Lean4Repl repo, as it did not exist")
+            os.system(
+                        f"git clone https://github.com/josojo/Lean4Repl.git {self.common_repl_dir}"
+            )
+            #build the lean files with lake in the common repl dir
+            logger.debug("Building the env repo, before coping code into it")
+            os.chdir(self.common_repl_dir)
+            os.system("lake build")
+        
+        
+        #copy the content from common repl dir into the tmp dir
+        logger.debug("Copying the content from common repl dir into the tmp dir")
+        if not os.path.exists(self.tmp_dir/Path("build")):
+            os.makedirs(self.tmp_dir, exist_ok=True)
+            shutil.copytree(
+                str(self.common_repl_dir),
+                str(self.tmp_dir) + "/",
+                dirs_exist_ok=True,
+            )
+        logger.debug("done")
+
+        if not self.uses_tactics:
+            raise NotImplementedError("Not implemented yet") 
+
+        # logger.debug(f"Creating new Main file with the content of {traced_file.lean_file.path}")
+
+        # Interaction through tactics.
+        modified_code = self._modify_proof(traced_file)
+        repl_file = "Main.lean"
+        repl_dst = self.tmp_dir / repl_file
+    
+        # logger.debug(f"Writing the modified code to {repl_dst}")
+        # logger.debug(f"Modified code: {modified_code}")
+
+        with repl_dst.open("wt") as oup:
+            oup.write(modified_code)
 
     def _modify_file(self, traced_file: TracedFile) -> None:
         logger.debug(f"Modifying {traced_file.lean_file.path}")
@@ -522,10 +611,14 @@ class Dojo:
 
         tsid = state.id
         if self.uses_lean4:
+            logger.debug(f"Running tactic(unfromatted): {tactic}")
+            tactic = format_tatic_for_repl(tactic)
+            logger.debug(f"Running tactic(fromatted): {tactic}")
             req = json.dumps({"sid": tsid, "cmd": tactic})
         else:
             req = json.dumps(["run_tac", [tsid, tactic]])
         res = self._submit_request(req)
+        logger.debug(f"Response from submitted_request: {res}")
 
         if res["error"] is not None:
             if "proof contains `sorry`" in res["error"]:
@@ -599,6 +692,7 @@ class Dojo:
             raise DojoCrashError("EOF")
         # logger.debug(f"Response: {res}")
         try:
+            logger.debug(f"Response[unparsed]: {res}")
             res = json.loads(res)
         except json.decoder.JSONDecodeError:
             raise DojoCrashError(f"Invalid JSON: {res}")

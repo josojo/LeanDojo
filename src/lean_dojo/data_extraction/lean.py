@@ -287,6 +287,8 @@ def get_lean4_commit_from_config(config: str) -> str:
 
     assert config.startswith(prefix), f"Invalid Lean 4 version: {config}"
     version = config[len(prefix) :]
+    if version == '4.0.0':
+        version = 'v4.0.0'
 
     if version.startswith("nightly"):
         return _to_commit_hash(LEAN4_NIGHTLY_REPO, version)
@@ -530,15 +532,15 @@ class LeanGitRepo:
         commit = get_lean4_commit_from_config(toolchain)
         deps = {"lean4": LeanGitRepo(LEAN4_URL, commit)}
 
-        for name, repo in self._parse_lakefile_dependencies(lakefile):
-            if name in deps:
-                assert deps[name] == repo
-            else:
-                deps[name] = repo
-            for dd_name, dd_repo in repo._get_lean4_dependencies(
-                None, [repo] + parents
-            ).items():
-                deps[dd_name] = dd_repo
+        # for name, repo in self._parse_lakefile_dependencies(lakefile):
+        #     if name in deps:
+        #         assert deps[name] == repo
+        #     else:
+        #         deps[name] = repo
+        #     for dd_name, dd_repo in repo._get_lean4_dependencies(
+        #         None, [repo] + parents
+        #     ).items():
+        #         deps[dd_name] = dd_repo
 
         return deps
 
