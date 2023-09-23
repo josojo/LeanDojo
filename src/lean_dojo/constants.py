@@ -83,6 +83,14 @@ LEAN4_NIGHTLY_REPO = GITHUB.get_repo("leanprover/lean4-nightly")
 LEAN4_DEPS_DIR = Path("lake-packages")
 """The directory where Lean 4 dependencies are stored."""
 
+LOAD_TRACED_DEPENDENCIES_RECURSIVELY = (
+    os.getenv("LOAD_TRACED_DEPENDENCIES_RECURSIVELY", "False").lower() == "true"
+)
+"""Whether to load traced dependencies recursively."""
+
+COMMON_REPL_DIR = Path(os.getenv("COMMON_REPL_DIR"))
+"""The directory where the common REPL is stored. Get the repo from here: https://github.com/josojo/Lean4Repl"""
+
 TACTIC_TIMEOUT = int(os.getenv("TACTIC_TIMEOUT", 5000))
 """Maximum time (in milliseconds) before interrupting a tactic when interacting with Lean (only for Lean 3).
 """
