@@ -150,8 +150,7 @@ class Dojo:
         self.hard_timeout = hard_timeout
         self.additional_imports = additional_imports
 
-        if self.uses_tactics:
-            assert isinstance(entry, Theorem)
+        if isinstance(entry, Theorem):
             self.repo, self.file_path = entry.repo, entry.file_path
             self.is_successful = False
         else:
